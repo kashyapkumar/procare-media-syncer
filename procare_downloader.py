@@ -125,10 +125,30 @@ def authenticate_with_procare(session):
     else:
         print_failure("Authentication with Procare failed", repsonse)
 
-def get_file_ext_from_url(photo_url):
-    image_filename = os.path.basename(urlparse(photo_url).path)
+def get_file_ext_from_url(media_url):
+    image_filename = os.path.basename(urlparse(media_url).path)
     filename, ext = os.path.splitext(image_filename)
     return ext
+
+def download_media_from_activity(session, activity, media_url):
+    print(f'Fetching picture from url: {media_url}')
+
+    response = session.get(media_url)
+    if response.status_code != 200:
+        print_failure("Media download failed", response)
+        return
+
+    activity_time = activity["activity_time"]
+    image_filename = activity_time + "_" + activity["id"]
+    image_filename += get_file_ext_from_url(media_url)
+    with open(image_filename, "wb") as file_handler:
+        file_handler.write(response.content)
+        file_handler.close()
+        print(f"Successfully wrote file: {image_filename}")
+
+    print(f'Setting image time to: {activity_time}')
+    subprocess.run(["touch", f"-d {activity_time}", f"{image_filename}"])
+    return image_filename
 
 def download_from_procare(photos_creds, filename_token_map):
     session = requests.Session()
@@ -136,38 +156,35 @@ def download_from_procare(photos_creds, filename_token_map):
     session.headers.update({'Authorization': 'Bearer ' + auth_token})
 
     current_date = datetime.today().strftime('%Y-%m-%d')
-    response = session.get(PROCARE_LIST_ACTIVITIES_ENDPOINT, params={
-        'kid_id': '1878ff2c-30f0-4a14-8b4b-6ff42d12c701',
-        'filters[daily_activity][date_to]': current_date,
-        'page': '1'})
-    if response.status_code != 200:
-        print_failure("Procare list_activities failed", response)
-        return
 
-    activities = response.json()["daily_activities"]
-    for activity in activities:
-        photo_url = activity["photo_url"]
-        if photo_url is None:
-            continue
-        
-        print(f'Fetching picture from url: {photo_url}')
-        response = session.get(photo_url)
+    page_num = 1
+    while True:
+        response = session.get(PROCARE_LIST_ACTIVITIES_ENDPOINT, params={
+            'kid_id': '1878ff2c-30f0-4a14-8b4b-6ff42d12c701',
+            'filters[daily_activity][date_to]': current_date,
+            'page': str(page_num)})
         if response.status_code != 200:
-            print_failure("Media download failed", response)
+            print_failure("Procare list_activities failed", response)
+            return
 
-        activity_time = activity["activity_time"]
-        image_filename = activity_time + "_" + activity["id"]
-        image_filename += get_file_ext_from_url(photo_url)
-        with open(image_filename, "wb") as file_handler:
-            file_handler.write(response.content)
-            file_handler.close()
-            print(f"Successfully wrote file: {image_filename}")
+        activities = response.json()["daily_activities"]
+        if (len(activities) == 0):
+            break
 
-        print(f'Setting image time to: {activity_time}')
+        for activity in activities:
+            if activity["activity_type"] == "photo_activity":
+                media_url = activity["activiable"]["main_url"]
+            elif activity["activity_type"] == "video_activity":
+                media_url = activity["activiable"]["video_file_url"]
+            else:
+                continue
+            
+            image_filename = download_media_from_activity(session, activity, media_url)
+            filename_token_map[image_filename] = upload_photo_bytes(photos_creds, image_filename)
+        
+            return
 
-        subprocess.run(["touch", f"-d {activity_time}", f"{image_filename}"])
-        filename_token_map[image_filename] = upload_photo_bytes(photos_creds, image_filename)
-        return
+        page_num += 1
 
 if __name__ == "__main__":
     photos_creds = authenticate_with_google_photos()
