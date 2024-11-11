@@ -77,10 +77,10 @@ def upload_photo_bytes(creds, filename):
     except Exception as e:
         print(e)
 
-def add_photos_to_album(creds, filename_token_map):
-    print(f"Number of files to add to album: {len(filename_token_map)}")
+def add_photos_to_album(creds, filenames):
+    print(f"Number of files to add to album: {len(filenames)}")
 
-    if len(filename_token_map) == 0:
+    if len(filenames) == 0:
         return
 
     batch_size = 50
@@ -88,17 +88,17 @@ def add_photos_to_album(creds, filename_token_map):
         "Content-type": "application/json",
         "Authorization": f"Bearer {creds.token}"
     }
-    filenames = list(filename_token_map.keys())
 
     # Add files to album in multiple batches with num files <= batch_size
     for i in range(0, len(filenames), batch_size):
         new_media_items = []
         for filename in filenames[i:i + batch_size]:
+            upload_token = upload_photo_bytes(photos_creds, filename)
             new_media_items.append({
                 "description": "Photos from the alpha.",
                 "simpleMediaItem": {
                     "fileName": filename,
-                    "uploadToken": filename_token_map[filename]
+                    "uploadToken": upload_token
                 }
             })
 
@@ -150,7 +150,7 @@ def download_media_from_activity(session, activity, media_url):
     subprocess.run(["touch", f"-d {activity_time}", f"{image_filename}"])
     return image_filename
 
-def download_from_procare(photos_creds, filename_token_map):
+def download_from_procare():
     session = requests.Session()
     auth_token = authenticate_with_procare(session)
     session.headers.update({'Authorization': 'Bearer ' + auth_token})
@@ -158,6 +158,7 @@ def download_from_procare(photos_creds, filename_token_map):
     current_date = datetime.today().strftime('%Y-%m-%d')
 
     page_num = 1
+    filenames = []
     while True:
         response = session.get(PROCARE_LIST_ACTIVITIES_ENDPOINT, params={
             'kid_id': '1878ff2c-30f0-4a14-8b4b-6ff42d12c701',
@@ -171,6 +172,7 @@ def download_from_procare(photos_creds, filename_token_map):
         if (len(activities) == 0):
             break
 
+
         for activity in activities:
             if activity["activity_type"] == "photo_activity":
                 media_url = activity["activiable"]["main_url"]
@@ -179,15 +181,13 @@ def download_from_procare(photos_creds, filename_token_map):
             else:
                 continue
             
-            image_filename = download_media_from_activity(session, activity, media_url)
-            filename_token_map[image_filename] = upload_photo_bytes(photos_creds, image_filename)
-        
-            return
+            media_filename = download_media_from_activity(session, activity, media_url)
+            filenames.append(media_filename)
+            return filenames
 
         page_num += 1
 
 if __name__ == "__main__":
     photos_creds = authenticate_with_google_photos()
-    filename_token_map = {}
-    download_from_procare(photos_creds, filename_token_map)
-    add_photos_to_album(photos_creds, filename_token_map)
+    filenames = download_from_procare()
+    add_photos_to_album(photos_creds, filenames)
