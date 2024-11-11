@@ -1,21 +1,19 @@
 import json
 import os
 import requests
-import piexif
-import shutil
 import mimetypes
-import pathlib
 import subprocess
 from datetime import datetime
 from urllib.parse import urlparse
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-from PIL import Image
 
 # Your credentials file from the Google Cloud Console
 PHOTOS_CREDENTIALS_FILE = 'secrets/google_photos_credentials.json' 
 PHOTOS_TOKEN_FILE = 'secrets/token.json'
+
+# JSON file with the email and password for Procare
 PROCARE_CREDENTIALS_FILE = 'secrets/procare_credentials.json'
 
 # Google Photos API scopes so that the app has permission for just photos
@@ -24,51 +22,12 @@ SCOPES = ["https://www.googleapis.com/auth/photoslibrary"]
 PHOTOS_API_BASE_URL = 'https://photoslibrary.googleapis.com/v1'
 PROCARE_API_BASE_URL = 'https://api-school.procareconnect.com/api/web'
 
-PHOTOS_LIST_ALBUMS_ENDPOINT = 'https://photoslibrary.googleapis.com/v1/albums'
 PHOTOS_UPLOAD_ENDPOINT = f'{PHOTOS_API_BASE_URL}/uploads'
 PHOTOS_ADD_MEDIA_ITEMS_ENDPOINT = f'{PHOTOS_API_BASE_URL}/mediaItems:batchCreate'
 PROCARE_LIST_ACTIVITIES_ENDPOINT = f'{PROCARE_API_BASE_URL}/parent/daily_activities/'
 PROCARE_AUTH_ENDPOINT = f'{PROCARE_API_BASE_URL}/auth'
 
-GOOGLE_PHOTOS_ALBUM_ID = 'AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ'
-
-def create_album(creds):
-    headers = {
-        "Authorization": f"Bearer {creds.token}",
-        'Content-Type': 'application/json'
-    }
-
-    request_data = {"album" : {"title" : "Ishan Stratford Pics!!" }}
-    response = requests.post(PHOTOS_LIST_ALBUMS_ENDPOINT, headers=headers, data=str(request_data))
-    print(response.text)
-
-def list_albums(creds):
-    headers = {
-        "Authorization": f"Bearer {creds.token}",
-    }
-    
-    next_page_token = None
-    while True:
-        response = requests.get(PHOTOS_LIST_ALBUMS_ENDPOINT,
-                headers=headers, 
-                params={
-                    'pageSize': 50,
-                    'pageToken': next_page_token
-                    })
-        print(response.text)
-        next_page_token = response.json()["nextPageToken"]
-
-def update_photo_exif_data(image_filename, activity_time):
-    image = Image.open(image_filename)
-    exif_dict = piexif.load(image.info["exif"])
-    exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal] = activity_time
-    exif_dict['Exif'][piexif.ExifIFD.DateTimeDigitized] = activity_time
-    exif_dict['0th'][piexif.ImageIFD.DateTime] = activity_time
-    exif_bytes = piexif.dump(exif_dict)
-    image.save(image_filename, "jpeg", exif=exif_bytes)
-
-    activity_datetime = datetime.fromisoformat(activity_time)
-    os.utime(image_filename, (activity_datetime.timestamp(), activity_datetime.timestamp()))
+PHOTOS_ALBUM_ID = 'AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ'
 
 def print_failure(prefix_str, response):
     print(prefix_str + f" with status code {response.status_code}, reason:\n{repsonse.text}")
@@ -119,27 +78,22 @@ def upload_photo_bytes(creds, filename):
         print(e)
 
 def add_photos_to_album(creds, filename_token_map):
-    print(f"Number of tokens to add to album: {len(filename_token_map)}")
+    print(f"Number of files to add to album: {len(filename_token_map)}")
 
     if len(filename_token_map) == 0:
         return
 
     batch_size = 50
-
     headers = {
         "Content-type": "application/json",
         "Authorization": f"Bearer {creds.token}"
     }
-
-    # Convert the dictionary values (upload tokens) into a list
     filenames = list(filename_token_map.keys())
 
-    # Split the list of tokens into batches of 45 or less
+    # Add files to album in multiple batches with num files <= batch_size
     for i in range(0, len(filenames), batch_size):
-        # Create newMediaItems for this batch
         new_media_items = []
         for filename in filenames[i:i + batch_size]:
-            # Get the filename associated with the upload token
             new_media_items.append({
                 "description": "Photos from the alpha.",
                 "simpleMediaItem": {
@@ -149,7 +103,7 @@ def add_photos_to_album(creds, filename_token_map):
             })
 
         request_body = {
-            "albumId": GOOGLE_PHOTOS_ALBUM_ID,
+            "albumId": PHOTOS_ALBUM_ID,
             "newMediaItems": new_media_items
         }
 
@@ -157,8 +111,7 @@ def add_photos_to_album(creds, filename_token_map):
         if response.status_code == 200:
             print(f"Adding {len(new_media_items)} photos to the album was successful.")
         else:
-            print(f"POST request failed with status code: {response.status_code}")
-            print(response.text)
+            print_failure("POST request to add media items failed", response)
 
 def authenticate_with_procare(session):
     with open(PROCARE_CREDENTIALS_FILE) as file:
@@ -170,7 +123,7 @@ def authenticate_with_procare(session):
         auth_token = response.json()['user']['auth_token']
         return auth_token
     else:
-        print(f"Authentication with ProCare failed with status code {response.status_code}, reason:\n{response.text}")
+        print_failure("Authentication with Procare failed", repsonse)
 
 def get_file_ext_from_url(photo_url):
     image_filename = os.path.basename(urlparse(photo_url).path)
