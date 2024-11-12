@@ -150,19 +150,19 @@ def get_filename_from_activity(activity, media_url):
     media_filename += get_file_ext(media_url, activity["activity_type"])
     return media_filename
 
-def download_media_from_activity(session, activity, media_url):
-    media_filename = get_filename_from_activity(activity, media_url)
+def download_media(session, media_url, media_filename, activity_time):
     response = session.get(media_url)
     if response.status_code != 200:
         print_failure("Media download failed", response)
         return
 
-    with open(DOWNLOADS_DIR + media_filename, "wb") as file_handler:
+    media_filepath = DOWNLOADS_DIR + media_filename
+    with open(media_filepath, "wb") as file_handler:
         file_handler.write(response.content)
         file_handler.close()
 
-    activity_time = activity["activity_time"]
-    subprocess.run(["touch", f"-d {activity_time}", f"{media_filename}"])
+    subprocess.run(["touch", f"-d {activity_time}", f"{media_filepath}"])
+    
     return media_filename
 
 def download_from_procare(existing_filenames):
@@ -170,10 +170,9 @@ def download_from_procare(existing_filenames):
     auth_token = authenticate_with_procare(session)
     session.headers.update({'Authorization': 'Bearer ' + auth_token})
 
-    current_date = datetime.today().strftime('%Y-%m-%d')
-
     page_num = 1
     filenames = []
+    current_date = datetime.today().strftime('%Y-%m-%d')
     while True:
         response = session.get(PROCARE_LIST_ACTIVITIES_ENDPOINT, params={
             'kid_id': '1878ff2c-30f0-4a14-8b4b-6ff42d12c701',
@@ -192,10 +191,12 @@ def download_from_procare(existing_filenames):
             if media_url is None:
                 continue
 
-            if get_filename_from_activity(activity, media_url) in existing_filenames:
+            media_filename = get_filename_from_activity(activity, media_url)
+            if media_filename in existing_filenames:
                 continue
 
-            media_filename = download_media_from_activity(session, activity, media_url)
+            activity_time = activity.get("activity_time")
+            download_media(session, media_url, media_filename, activity_time)
             filenames.append(media_filename)
 
         page_num += 1
