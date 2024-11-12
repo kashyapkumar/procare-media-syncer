@@ -24,13 +24,16 @@ PROCARE_API_BASE_URL = 'https://api-school.procareconnect.com/api/web'
 
 PHOTOS_UPLOAD_ENDPOINT = f'{PHOTOS_API_BASE_URL}/uploads'
 PHOTOS_ADD_MEDIA_ITEMS_ENDPOINT = f'{PHOTOS_API_BASE_URL}/mediaItems:batchCreate'
+PHOTOS_LIST_MEDIA_ITEMS_ENDPOINT = f'{PHOTOS_API_BASE_URL}/mediaItems:search'
 PROCARE_LIST_ACTIVITIES_ENDPOINT = f'{PROCARE_API_BASE_URL}/parent/daily_activities/'
 PROCARE_AUTH_ENDPOINT = f'{PROCARE_API_BASE_URL}/auth'
+
+DOWNLOADS_DIR = 'downloads/'
 
 PHOTOS_ALBUM_ID = 'AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ'
 
 def print_failure(prefix_str, response):
-    print(prefix_str + f" with status code {response.status_code}, reason:\n{repsonse.text}")
+    print(prefix_str + f" with status code {response.status_code}, reason:\n{response.text}")
 
 def authenticate_with_google_photos():
     creds = None
@@ -64,7 +67,7 @@ def upload_photo_bytes(creds, filename):
     }
     try:
         # We need the binary data for the request body
-        with open(filename, "rb") as file:
+        with open(DOWNLOADS_DIR + filename, "rb") as file:
             binary_data = file.read()
 
         response = requests.post(PHOTOS_UPLOAD_ENDPOINT, headers=headers, data=binary_data)
@@ -78,7 +81,7 @@ def upload_photo_bytes(creds, filename):
         print(e)
 
 def add_photos_to_album(creds, filenames):
-    print(f"Number of files to add to album: {len(filenames)}")
+    print(f"Adding {len(filenames)} files to add to album: {filenames}")
 
     if len(filenames) == 0:
         return
@@ -97,7 +100,7 @@ def add_photos_to_album(creds, filenames):
             new_media_items.append({
                 "description": "Photos from the alpha.",
                 "simpleMediaItem": {
-                    "fileName": filename,
+                    "fileName": DOWNLOADS_DIR + filename,
                     "uploadToken": upload_token
                 }
             })
@@ -125,32 +128,44 @@ def authenticate_with_procare(session):
     else:
         print_failure("Authentication with Procare failed", repsonse)
 
-def get_file_ext_from_url(media_url):
-    image_filename = os.path.basename(urlparse(media_url).path)
-    filename, ext = os.path.splitext(image_filename)
-    return ext
+def get_file_ext(media_url, activity_type):
+    media_filename = os.path.basename(urlparse(media_url).path)
+    filename, ext = os.path.splitext(media_filename)
+
+    if ext is not None and not ext == "":
+        return ext
+    elif activity_type == "photo_activity":
+        return ".jpg"
+    elif activity_type == "video_activity":
+        return ".mp4"
+
+def get_media_url_from_activity(activity):
+    if activity["activity_type"] == "photo_activity":
+        return activity["activiable"]["main_url"]
+    elif activity["activity_type"] == "video_activity":
+        return activity["activiable"]["video_file_url"]
+
+def get_filename_from_activity(activity, media_url):
+    media_filename = activity["activity_time"] + "_" + activity["id"]
+    media_filename += get_file_ext(media_url, activity["activity_type"])
+    return media_filename
 
 def download_media_from_activity(session, activity, media_url):
-    print(f'Fetching picture from url: {media_url}')
-
+    media_filename = get_filename_from_activity(activity, media_url)
     response = session.get(media_url)
     if response.status_code != 200:
         print_failure("Media download failed", response)
         return
 
-    activity_time = activity["activity_time"]
-    image_filename = activity_time + "_" + activity["id"]
-    image_filename += get_file_ext_from_url(media_url)
-    with open(image_filename, "wb") as file_handler:
+    with open(DOWNLOADS_DIR + media_filename, "wb") as file_handler:
         file_handler.write(response.content)
         file_handler.close()
-        print(f"Successfully wrote file: {image_filename}")
 
-    print(f'Setting image time to: {activity_time}')
-    subprocess.run(["touch", f"-d {activity_time}", f"{image_filename}"])
-    return image_filename
+    activity_time = activity["activity_time"]
+    subprocess.run(["touch", f"-d {activity_time}", f"{media_filename}"])
+    return media_filename
 
-def download_from_procare():
+def download_from_procare(existing_filenames):
     session = requests.Session()
     auth_token = authenticate_with_procare(session)
     session.headers.update({'Authorization': 'Bearer ' + auth_token})
@@ -172,22 +187,56 @@ def download_from_procare():
         if (len(activities) == 0):
             break
 
-
         for activity in activities:
-            if activity["activity_type"] == "photo_activity":
-                media_url = activity["activiable"]["main_url"]
-            elif activity["activity_type"] == "video_activity":
-                media_url = activity["activiable"]["video_file_url"]
-            else:
+            media_url = get_media_url_from_activity(activity)
+            if media_url is None:
                 continue
-            
+
+            if get_filename_from_activity(activity, media_url) in existing_filenames:
+                continue
+
             media_filename = download_media_from_activity(session, activity, media_url)
             filenames.append(media_filename)
-            return filenames
 
         page_num += 1
+    
+    return filenames
+
+def list_photos_in_album(creds):
+    headers = {
+        "Authorization": f"Bearer {creds.token}",
+    }
+    params = {
+        "albumId": PHOTOS_ALBUM_ID,
+        "pageSize": 50,
+    }
+
+    existing_filenames = []
+
+    while True:
+        response = requests.post(PHOTOS_LIST_MEDIA_ITEMS_ENDPOINT, headers=headers, json=params)
+
+        if response.status_code == 200:
+            data = response.json()
+            media_items = data.get("mediaItems", [])
+
+            for media_item in media_items:
+                existing_filenames.append(media_item.get("filename"))
+
+            # nextPageToken will be present only if there are more pages
+            next_page_token = data.get("nextPageToken")
+            if next_page_token:
+                params["pageToken"] = next_page_token
+            else:
+                break
+        else:
+            print_failure("Failed to list photos in album", response)
+            break
+
+    return existing_filenames
 
 if __name__ == "__main__":
     photos_creds = authenticate_with_google_photos()
-    filenames = download_from_procare()
+    existing_filenames = list_photos_in_album(photos_creds)
+    filenames = download_from_procare(existing_filenames)
     add_photos_to_album(photos_creds, filenames)
