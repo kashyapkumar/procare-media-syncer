@@ -40,14 +40,29 @@ DOWNLOADS_DIR = "/home/homeassistant/procare-syncer/downloads/"
 
 PHOTOS_ALBUM_ID = "AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ"
 
-
 def print_failure(prefix_str, response):
+  """Prints a failure message given a prefix string & HTTP response
+
+  Args:
+    prefix_str: The prefix string for the error message
+    response: The HTTP response to print for debugging
+  """
   print(
       prefix_str + f" code: {response.status_code}, reason:\n{response.text}"
   )
 
 
 def authenticate_with_google_photos():
+  """Authenticates with Google Photos given a credentials / tokens file.
+  
+  The credentials JSON file (PHOTOS_CREDENTIALS_FILE) needs to be downloaded
+  Google Cloud Console for the first time authentication. During first time
+  authentication, a token file (PHOTOS_TOKEN_FILE) is generated which is used
+  for subsequent authentication.
+  
+  Returns:
+    The Google Photos credentials
+  """
   creds = None
 
   if os.path.exists(PHOTOS_TOKEN_FILE):
@@ -68,17 +83,25 @@ def authenticate_with_google_photos():
   return creds
 
 
-def get_mime(file):
-  mime = mimetypes.guess_type(file)
+def get_mime(filename):
+  """Returns the mime type of the file given the filename"""
+  mime = mimetypes.guess_type(filename)
   return str(mime[0])
 
 
 def upload_photo_bytes(creds, filename):
-  mime_type = get_mime(filename)
+  """Uploads the photo from filename and returns the upload token.
+
+  Args:
+    creds: The Google Photos creds to use for the upload
+
+  Returns:
+    The upload token
+  """
   headers = {
       "Authorization": f"Bearer {creds.token}",
       "Content-type": "application/octet-stream",
-      "X-Goog-Upload-Content-Type": mime_type,
+      "X-Goog-Upload-Content-Type": get_mime(filename),
       "X-Goog-Upload-Protocol": "raw",
   }
   try:
@@ -92,7 +115,7 @@ def upload_photo_bytes(creds, filename):
 
     if response.status_code == 200:
       print(f"Uploaded {filename} successfully.")
-      return response.text  # upload token
+      return response.text  # Return the upload token
     else:
       print_failure("Upload failed", response)
   except Exception as e:
@@ -100,6 +123,18 @@ def upload_photo_bytes(creds, filename):
 
 
 def add_photos_to_album(creds, filename_desc_map):
+  """Adds photos to the album with the provided filenames and descriptions
+
+  Uploads photos from filename_desc_map to PHOTOS_ALBUM_ID.
+    * Google Photos API supports setting a filename for each media item. We're
+      setting that to our locally generated filename.
+    * Google Photos API also supports setting a description for each media item.
+      We set that to the value from filename_desc_map.
+
+  Args:
+    creds: The Google Photos credentials to use for the request
+    filename_desc_map: A dictionary of filename to descriptions
+  """
   filenames = list(filename_desc_map.keys())
   print(f"Adding {len(filenames)} files to add to album: {filenames}")
 
@@ -286,4 +321,6 @@ if __name__ == "__main__":
   print(f"Found {len(existing_filenames)} in the Google Photos album")
 
   filename_desc_map = download_from_procare(existing_filenames)
+  print(f'Downloaded {len(filename_desc_map} new files from Procare')
+
   add_photos_to_album(photos_creds, filename_desc_map)
