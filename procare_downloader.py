@@ -10,11 +10,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
 # Your credentials file from the Google Cloud Console
-PHOTOS_CREDENTIALS_FILE = 'secrets/google_photos_credentials.json' 
-PHOTOS_TOKEN_FILE = 'secrets/token.json'
+PHOTOS_CREDENTIALS_FILE = '/home/homeassistant/procare-syncer/secrets/google_photos_credentials.json' 
+PHOTOS_TOKEN_FILE = '/home/homeassistant/procare-syncer/secrets/token.json'
 
 # JSON file with the email and password for Procare
-PROCARE_CREDENTIALS_FILE = 'secrets/procare_credentials.json'
+PROCARE_CREDENTIALS_FILE = '/home/homeassistant/procare-syncer/secrets/procare_credentials.json'
 
 # Google Photos API scopes so that the app has permission for just photos
 SCOPES = ["https://www.googleapis.com/auth/photoslibrary"]
@@ -28,7 +28,7 @@ PHOTOS_LIST_MEDIA_ITEMS_ENDPOINT = f'{PHOTOS_API_BASE_URL}/mediaItems:search'
 PROCARE_LIST_ACTIVITIES_ENDPOINT = f'{PROCARE_API_BASE_URL}/parent/daily_activities/'
 PROCARE_AUTH_ENDPOINT = f'{PROCARE_API_BASE_URL}/auth'
 
-DOWNLOADS_DIR = 'downloads/'
+DOWNLOADS_DIR = '/home/homeassistant/procare-syncer/downloads/'
 
 PHOTOS_ALBUM_ID = 'AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ'
 
@@ -80,7 +80,8 @@ def upload_photo_bytes(creds, filename):
     except Exception as e:
         print(e)
 
-def add_photos_to_album(creds, filenames):
+def add_photos_to_album(creds, filename_desc_map):
+    filenames = list(filename_desc_map.keys())
     print(f"Adding {len(filenames)} files to add to album: {filenames}")
 
     if len(filenames) == 0:
@@ -98,7 +99,7 @@ def add_photos_to_album(creds, filenames):
         for filename in filenames[i:i + batch_size]:
             upload_token = upload_photo_bytes(photos_creds, filename)
             new_media_items.append({
-                "description": "Photos from the alpha.",
+                "description": filename_desc_map.get(filename),
                 "simpleMediaItem": {
                     "fileName": DOWNLOADS_DIR + filename,
                     "uploadToken": upload_token
@@ -156,6 +157,8 @@ def download_media(session, media_url, media_filename, activity_time):
         print_failure("Media download failed", response)
         return
 
+    print(f"Downloaded new media: {media_filename}")
+
     media_filepath = DOWNLOADS_DIR + media_filename
     with open(media_filepath, "wb") as file_handler:
         file_handler.write(response.content)
@@ -171,7 +174,7 @@ def download_from_procare(existing_filenames):
     session.headers.update({'Authorization': 'Bearer ' + auth_token})
 
     page_num = 1
-    filenames = []
+    filename_desc_map = {}
     current_date = datetime.today().strftime('%Y-%m-%d')
     while True:
         response = session.get(PROCARE_LIST_ACTIVITIES_ENDPOINT, params={
@@ -186,6 +189,8 @@ def download_from_procare(existing_filenames):
         if (len(activities) == 0):
             break
 
+        print(f'Listing Procare activities page_num: {page_num}, num activities: {len(activities)}')
+        
         for activity in activities:
             media_url = get_media_url_from_activity(activity)
             if media_url is None:
@@ -197,11 +202,13 @@ def download_from_procare(existing_filenames):
 
             activity_time = activity.get("activity_time")
             download_media(session, media_url, media_filename, activity_time)
-            filenames.append(media_filename)
+            
+            description = activity.get("activiable").get("caption")
+            filename_desc_map[media_filename] = description
 
         page_num += 1
     
-    return filenames
+    return filename_desc_map
 
 def list_photos_in_album(creds):
     headers = {
@@ -239,5 +246,7 @@ def list_photos_in_album(creds):
 if __name__ == "__main__":
     photos_creds = authenticate_with_google_photos()
     existing_filenames = list_photos_in_album(photos_creds)
-    filenames = download_from_procare(existing_filenames)
-    add_photos_to_album(photos_creds, filenames)
+    print(f"Found {len(existing_filenames)} in the Google Photos album")
+
+    filename_desc_map = download_from_procare(existing_filenames)
+    add_photos_to_album(photos_creds, filename_desc_map)
