@@ -4,6 +4,7 @@ import mimetypes
 import os
 import subprocess
 from urllib.parse import urlparse
+from dataclasses import dataclass
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -34,11 +35,19 @@ PHOTOS_LIST_MEDIA_ITEMS_ENDPOINT = f"{PHOTOS_API_BASE_URL}/mediaItems:search"
 PROCARE_LIST_ACTIVITIES_ENDPOINT = (
     f"{PROCARE_API_BASE_URL}/parent/daily_activities/"
 )
+PROCARE_LIST_KIDS_ENDPOINT = f"{PROCARE_API_BASE_URL}/parent/kids/"
 PROCARE_AUTH_ENDPOINT = f"{PROCARE_API_BASE_URL}/auth"
 
 DOWNLOADS_DIR = "/home/homeassistant/procare-syncer/downloads/"
 
-PHOTOS_ALBUM_ID = "AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ"
+PHOTOS_ALBUM_IDS = ["AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ"]
+
+@dataclass
+class KidProfile:
+  kid_id: str
+  name: str
+  album_id: str
+
 
 def print_failure(prefix_str, response):
   """Prints a failure message given a prefix string & HTTP response
@@ -122,10 +131,10 @@ def upload_photo_bytes(creds, filename):
     print(e)
 
 
-def add_photos_to_album(creds, filename_desc_map):
-  """Adds photos to the album with the provided filenames and descriptions
+def add_media_to_album(creds, album_id, filename_desc_map):
+  """Adds media to the album with the provided filenames and descriptions
 
-  Uploads photos from filename_desc_map to PHOTOS_ALBUM_ID.
+  Uploads media from filename_desc_map to the specified Google Photos album_id.
     * Google Photos API supports setting a filename for each media item. We're
       setting that to our locally generated filename.
     * Google Photos API also supports setting a description for each media item.
@@ -133,6 +142,7 @@ def add_photos_to_album(creds, filename_desc_map):
 
   Args:
     creds: The Google Photos credentials to use for the request
+    album_id: The Google Photos album id to add media to
     filename_desc_map: A dictionary of filename to descriptions
   """
   filenames = list(filename_desc_map.keys())
@@ -161,7 +171,7 @@ def add_photos_to_album(creds, filename_desc_map):
       })
 
     request_body = {
-        "albumId": PHOTOS_ALBUM_ID,
+        "albumId": album_id,
         "newMediaItems": new_media_items,
     }
 
@@ -245,7 +255,7 @@ def download_media(session, media_url, media_filename, activity_time):
   subprocess.run(["touch", f"-d {activity_time}", f"{media_filepath}"])
 
 
-def download_new_media_from_procare(existing_filenames):
+def procare_download_new_media(session, kid_id, existing_filenames):
   """Downloads new media files (not present in existing_filenames) from Procare
   
   This method does the following:
@@ -255,12 +265,11 @@ def download_new_media_from_procare(existing_filenames):
  
   Arguments:
     existing_filenames: List of filenames already present in Photos album  
-  
+    kid_id: The kid to download media for  
+
   Returns:
     A dictionary of newly downloaded filenames --> corresponding captions.
   """
-  session = requests.Session()
-  authenticate_with_procare(session)
 
   page_num = 1
   filename_desc_map = {}
@@ -268,8 +277,8 @@ def download_new_media_from_procare(existing_filenames):
   while True:
     response = session.get(
         PROCARE_LIST_ACTIVITIES_ENDPOINT,
-        params={
-            "kid_id": "1878ff2c-30f0-4a14-8b4b-6ff42d12c701",
+        params = {
+            "kid_id": kid_id,
             "filters[daily_activity][date_to]": current_date,
             "page": str(page_num),
         },
@@ -310,9 +319,18 @@ def download_new_media_from_procare(existing_filenames):
   return filename_desc_map
 
 
-def list_photos_in_album(creds):
+def list_media_in_album(creds, album_id):
+  """List filenames of media in the provided Google Photos album_id
+
+  Arguments:
+    creds: The Google Photos credentials to use
+    album_id: The Google Photos album id to list media from
+
+  Returns:
+    List of filenames in the album
+  """
   headers = { "Authorization": f"Bearer {creds.token}" }
-  params = { "albumId": PHOTOS_ALBUM_ID, "pageSize": 50 }
+  params = { "albumId": album_id, "pageSize": 50 }
 
   existing_filenames = []
   while True:
@@ -339,13 +357,48 @@ def list_photos_in_album(creds):
   return existing_filenames
 
 
+def procare_list_kids(session):
+  """List of KidProfiles in the Procare account
+
+  Arguments:
+    session: The Procare session object to use for Procare requests
+
+  Returns:
+    A list of KidProfiles
+  """
+  response = session.get(PROCARE_LIST_KIDS_ENDPOINT)
+
+  if response.status_code != 200:
+    print_failure("Procare list kids failed", response)
+
+  index = 0
+  kid_profiles = []
+  for entry in response.json().get("kids"):
+    kid_profiles.append(KidProfile(
+                          entry.get("id"),
+                          entry.get("first_name"),
+                          PHOTOS_ALBUM_IDS[index]))
+    index += 1
+
+  return kid_profiles
+
 if __name__ == "__main__":
   photos_creds = authenticate_with_google_photos()
+
+  session = requests.Session()
+  authenticate_with_procare(session)
+
+  kid_profiles = procare_list_kids(session)
+  print(f"Found {len(kid_profiles)} kid profiles")
   
-  existing_filenames = list_photos_in_album(photos_creds)
-  print(f"Found {len(existing_filenames)} in the Google Photos album")
+  for kid_profile in kid_profiles:
+    print(f"Processing kid: {kid_profile.name}")
 
-  filename_desc_map = download_new_media_from_procare(existing_filenames)
-  print(f'Downloaded {len(filename_desc_map)} new files from Procare')
+    existing_filenames = list_media_in_album(photos_creds, kid_profile.album_id)
+    print(f"Found {len(existing_filenames)} in the Google Photos album")
+    
+    filename_desc_map = procare_download_new_media(
+        session, kid_profile.kid_id, existing_filenames)
+    print(f'Downloaded {len(filename_desc_map)} new files from Procare')
 
-  add_photos_to_album(photos_creds, filename_desc_map)
+    add_media_to_album(photos_creds, kid_profile.album_id, filename_desc_map)
