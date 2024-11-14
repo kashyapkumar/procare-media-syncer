@@ -15,6 +15,9 @@ PHOTOS_CREDENTIALS_FILE = (
     "/home/homeassistant/procare-syncer/secrets/google_photos_credentials.json"
 )
 PHOTOS_TOKEN_FILE = "/home/homeassistant/procare-syncer/secrets/token.json"
+PHOTOS_ALBUM_IDS_FILE = (
+    "/home/homeassistant/procare-syncer/secrets/photos_album_ids.txt"
+)
 
 # JSON file with the email and password for Procare
 PROCARE_CREDENTIALS_FILE = (
@@ -27,6 +30,7 @@ SCOPES = ["https://www.googleapis.com/auth/photoslibrary"]
 PHOTOS_API_BASE_URL = "https://photoslibrary.googleapis.com/v1"
 PROCARE_API_BASE_URL = "https://api-school.procareconnect.com/api/web"
 
+PHOTOS_CREATE_ALBUM_ENDPOINT = f"{PHOTOS_API_BASE_URL}/albums"
 PHOTOS_UPLOAD_ENDPOINT = f"{PHOTOS_API_BASE_URL}/uploads"
 PHOTOS_ADD_MEDIA_ITEMS_ENDPOINT = (
     f"{PHOTOS_API_BASE_URL}/mediaItems:batchCreate"
@@ -39,8 +43,6 @@ PROCARE_LIST_KIDS_ENDPOINT = f"{PROCARE_API_BASE_URL}/parent/kids/"
 PROCARE_AUTH_ENDPOINT = f"{PROCARE_API_BASE_URL}/auth"
 
 DOWNLOADS_DIR = "/home/homeassistant/procare-syncer/downloads/"
-
-PHOTOS_ALBUM_IDS = ["AG1aZA-O5Vqaepq4ot53MSqAjUfJROPKiITAqRtAdQALnONFKx3cR_8WS6SMmv6Vqwm0ZHz5WYnJ"]
 
 @dataclass
 class KidProfile:
@@ -91,11 +93,29 @@ def authenticate_with_google_photos():
 
   return creds
 
+def create_album(creds, kid_name):
+  """Creates an album given the kid's name
 
-def get_mime(filename):
-  """Returns the mime type of the file given the filename"""
-  mime = mimetypes.guess_type(filename)
-  return str(mime[0])
+  Arguments:
+    creds: The credentials to use for Google Photos
+    kid_name: The kid's name
+
+  Returns:
+    The album id
+  """
+  headers = {
+      "Authorization": f"Bearer {creds.token}",
+      'Content-Type': 'application/json'
+  }
+  request_data = { "album" : { "title" : f"{kid_name} School Pictures!" } }
+  response = requests.post(
+      PHOTOS_CREATE_ALBUM_ENDPOINT, headers=headers, data=str(request_data)
+  )
+  if response.status_code != 200:
+    print_error("Photos create album failed", response)
+
+  print(f"Created new album: {response.json()}")
+  return response.json().get("id")
 
 
 def upload_photo_bytes(creds, filename):
@@ -107,10 +127,12 @@ def upload_photo_bytes(creds, filename):
   Returns:
     The upload token
   """
+
+  mime_type = str(mimetypes.guess_type(filename)[0])
   headers = {
       "Authorization": f"Bearer {creds.token}",
       "Content-type": "application/octet-stream",
-      "X-Goog-Upload-Content-Type": get_mime(filename),
+      "X-Goog-Upload-Content-Type": mime_type,
       "X-Goog-Upload-Protocol": "raw",
   }
   try:
@@ -357,10 +379,11 @@ def list_media_in_album(creds, album_id):
   return existing_filenames
 
 
-def procare_list_kids(session):
-  """List of KidProfiles in the Procare account
+def create_kid_profiles(photos_creds, session):
+  """Create a profile for each kid in the Procare account
 
   Arguments:
+    photos_creds: The Google Photos creds to create an album if necessary
     session: The Procare session object to use for Procare requests
 
   Returns:
@@ -371,15 +394,28 @@ def procare_list_kids(session):
   if response.status_code != 200:
     print_failure("Procare list kids failed", response)
 
+  album_ids = []
+  # Open with mode 'w+' so that the file is created if it doesn't exist.
+  with open(PHOTOS_ALBUM_IDS_FILE, 'w+') as f:
+    album_ids = f.read().splitlines()
+
   index = 0
   kid_profiles = []
   for entry in response.json().get("kids"):
-    kid_profiles.append(KidProfile(
-                          entry.get("id"),
-                          entry.get("first_name"),
-                          PHOTOS_ALBUM_IDS[index]))
+    kid_name = entry.get("first_name")
+
+    if index + 1 > len(album_ids):
+      album_ids.append(create_album(photos_creds, kid_name))
+    
+    kid_profile = KidProfile(entry.get("id"), kid_name, album_ids[index])
+    kid_profiles.append(kid_profile)
     index += 1
 
+  # Write back to the file in case new albums were created above
+  with open(PHOTOS_ALBUM_IDS_FILE, 'w') as f:
+    for album_id in album_ids:
+      f.write(f"{album_id}\n")
+  
   return kid_profiles
 
 if __name__ == "__main__":
@@ -388,7 +424,7 @@ if __name__ == "__main__":
   session = requests.Session()
   authenticate_with_procare(session)
 
-  kid_profiles = procare_list_kids(session)
+  kid_profiles = create_kid_profiles(photos_creds, session)
   print(f"Found {len(kid_profiles)} kid profiles")
   
   for kid_profile in kid_profiles:
