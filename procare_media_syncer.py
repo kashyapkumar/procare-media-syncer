@@ -1,6 +1,7 @@
 import json
 import mimetypes
 import requests
+import sys
 import os
 import subprocess
 from datetime import datetime
@@ -11,18 +12,10 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from urllib.parse import urlparse
 
 # Your credentials file from the Google Cloud Console
-PHOTOS_CREDENTIALS_FILE = (
-    "/home/homeassistant/procare-syncer/secrets/google_photos_credentials.json"
-)
-PHOTOS_TOKEN_FILE = "/home/homeassistant/procare-syncer/secrets/token.json"
-PHOTOS_ALBUM_IDS_FILE = (
-    "/home/homeassistant/procare-syncer/secrets/photos_album_ids.txt"
-)
-
-# JSON file with the email and password for Procare
-PROCARE_CREDENTIALS_FILE = (
-    "/home/homeassistant/procare-syncer/secrets/procare_credentials.json"
-)
+PHOTOS_CREDENTIALS_FILE = "/secrets/google_photos_credentials.json"
+PHOTOS_TOKEN_FILE = "/secrets/token.json"
+PHOTOS_ALBUM_IDS_FILE = "/secrets/photos_album_ids.txt"
+PROCARE_CREDENTIALS_FILE = "/secrets/procare_credentials.json"
 
 # Google Photos API scopes so that the app has permission for just photos
 SCOPES = ["https://www.googleapis.com/auth/photoslibrary"]
@@ -63,28 +56,32 @@ def print_failure(prefix_str, response):
   )
 
 
-def authenticate_with_google_photos():
+def authenticate_with_google_photos(base_dir):
   """Authenticates with Google Photos given a credentials / tokens file.
   
   The credentials JSON file (PHOTOS_CREDENTIALS_FILE) needs to be downloaded
   Google Cloud Console for the first time authentication. During first time
   authentication, a token file (PHOTOS_TOKEN_FILE) is generated which is used
   for subsequent authentication.
+
+  Arguments:
+    base_dir: Base directory to read files from 
   
   Returns:
     The Google Photos credentials
   """
   creds = None
 
-  if os.path.exists(PHOTOS_TOKEN_FILE):
-    creds = Credentials.from_authorized_user_file(PHOTOS_TOKEN_FILE, SCOPES)
+  token_file = base_dir + PHOTOS_TOKEN_FILE
+  if os.path.exists(token_file):
+    creds = Credentials.from_authorized_user_file(token_file, SCOPES)
 
   if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:
       creds.refresh(Request())
     else:
       flow = InstalledAppFlow.from_client_secrets_file(
-          PHOTOS_CREDENTIALS_FILE, SCOPES
+          base_dir + PHOTOS_CREDENTIALS_FILE, SCOPES
       )
       creds = flow.run_local_server(port=0)
 
@@ -208,13 +205,14 @@ def add_media_to_album(creds, album_id, filename_desc_map):
       print_failure("POST request to add media items failed", response)
 
 
-def authenticate_with_procare(session):
+def authenticate_with_procare(base_dir, session):
   """Authenticates with Procare and updates the session with the credentials.
 
   Arguments:
+    base_dir: Base directory to read files from
     session: The session object to be updated
   """
-  with open(PROCARE_CREDENTIALS_FILE) as file:
+  with open(base_dir + PROCARE_CREDENTIALS_FILE) as file:
     procare_creds = json.load(file)
     file.close()
 
@@ -379,10 +377,11 @@ def list_media_in_album(creds, album_id):
   return existing_filenames
 
 
-def create_kid_profiles(photos_creds, session):
+def create_kid_profiles(base_dir, photos_creds, session):
   """Create a profile for each kid in the Procare account
 
   Arguments:
+    base_dir: Base directory to read files from
     photos_creds: The Google Photos creds to create an album if necessary
     session: The Procare session object to use for Procare requests
 
@@ -396,11 +395,12 @@ def create_kid_profiles(photos_creds, session):
 
   album_ids = []
   # Open with mode 'w+' so that the file is created if it doesn't exist.
-  with open(PHOTOS_ALBUM_IDS_FILE, 'w+') as f:
+  with open(base_dir + PHOTOS_ALBUM_IDS_FILE, 'r+') as f:
     album_ids = f.read().splitlines()
 
   index = 0
   kid_profiles = []
+  
   for entry in response.json().get("kids"):
     kid_name = entry.get("first_name")
 
@@ -412,19 +412,23 @@ def create_kid_profiles(photos_creds, session):
     index += 1
 
   # Write back to the file in case new albums were created above
-  with open(PHOTOS_ALBUM_IDS_FILE, 'w') as f:
+  with open(base_dir + PHOTOS_ALBUM_IDS_FILE, 'w') as f:
     for album_id in album_ids:
       f.write(f"{album_id}\n")
   
   return kid_profiles
 
 if __name__ == "__main__":
-  photos_creds = authenticate_with_google_photos()
+  base_dir = "."
+  if len(sys.argv) > 1:
+    base_dir = sys.argv[1]
+
+  photos_creds = authenticate_with_google_photos(base_dir)
 
   session = requests.Session()
-  authenticate_with_procare(session)
+  authenticate_with_procare(base_dir, session)
 
-  kid_profiles = create_kid_profiles(photos_creds, session)
+  kid_profiles = create_kid_profiles(base_dir, photos_creds, session)
   print(f"Found {len(kid_profiles)} kid profiles")
   
   for kid_profile in kid_profiles:
