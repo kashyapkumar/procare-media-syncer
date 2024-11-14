@@ -321,6 +321,6 @@ if __name__ == "__main__":
   print(f"Found {len(existing_filenames)} in the Google Photos album")
 
   filename_desc_map = download_from_procare(existing_filenames)
-  print(f'Downloaded {len(filename_desc_map} new files from Procare')
+  print(f'Downloaded {len(filename_desc_map)} new files from Procare')
 
   add_photos_to_album(photos_creds, filename_desc_map)
