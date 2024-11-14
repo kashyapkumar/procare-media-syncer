@@ -155,7 +155,7 @@ def add_photos_to_album(creds, filename_desc_map):
       new_media_items.append({
           "description": filename_desc_map.get(filename),
           "simpleMediaItem": {
-              "fileName": DOWNLOADS_DIR + filename,
+              "fileName": filename,
               "uploadToken": upload_token,
           },
       })
