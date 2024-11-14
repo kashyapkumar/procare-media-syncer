@@ -177,6 +177,11 @@ def add_photos_to_album(creds, filename_desc_map):
 
 
 def authenticate_with_procare(session):
+  """Authenticates with Procare and updates the session with the credentials.
+
+  Arguments:
+    session: The session object to be updated
+  """
   with open(PROCARE_CREDENTIALS_FILE) as file:
     procare_creds = json.load(file)
     file.close()
@@ -184,12 +189,24 @@ def authenticate_with_procare(session):
   response = session.post(PROCARE_AUTH_ENDPOINT, json=procare_creds)
   if response.status_code == 201:
     auth_token = response.json()["user"]["auth_token"]
-    return auth_token
+    session.headers.update({"Authorization": "Bearer " + auth_token})
   else:
     print_failure("Authentication with Procare failed", response)
 
 
 def get_file_ext(media_url, activity_type):
+  """Get the file extension from the media url's basename
+
+  Returns the file extension including the '.' if available. If not, it returns
+  a default based on the activity_type (.jpg/.mp4)
+
+  Arguments:
+    media_url: The media url of the file being downloaded
+    activity_type: The activity_type classification of the activity on Procare.
+
+  Returns:
+    The string file extension.
+  """
   media_filename = os.path.basename(urlparse(media_url).path)
   filename, ext = os.path.splitext(media_filename)
 
@@ -201,20 +218,18 @@ def get_file_ext(media_url, activity_type):
     return ".mp4"
 
 
-def get_media_url_from_activity(activity):
-  if activity["activity_type"] == "photo_activity":
-    return activity["activiable"]["main_url"]
-  elif activity["activity_type"] == "video_activity":
-    return activity["activiable"]["video_file_url"]
-
-
-def get_filename_from_activity(activity, media_url):
-  media_filename = activity["activity_time"] + "_" + activity["id"]
-  media_filename += get_file_ext(media_url, activity["activity_type"])
-  return media_filename
-
-
 def download_media(session, media_url, media_filename, activity_time):
+  """Downloads media from a given media_url into media_filename
+  
+  Arguments:
+    session: The session object with Procare auth header
+    media_url: The url from which media should be downloaded
+    media_filename: The filename in DOWNLOADS_DIR to download the media into
+    activity_time: The time to set as modified time on the downloaded file
+  
+  Returns:
+    No return value.
+  """
   response = session.get(media_url)
   if response.status_code != 200:
     print_failure("Media download failed", response)
@@ -229,13 +244,23 @@ def download_media(session, media_url, media_filename, activity_time):
 
   subprocess.run(["touch", f"-d {activity_time}", f"{media_filepath}"])
 
-  return media_filename
 
-
-def download_from_procare(existing_filenames):
+def download_new_media_from_procare(existing_filenames):
+  """Downloads new media files (not present in existing_filenames) from Procare
+  
+  This method does the following:
+    * Lists all activities from Procare until current date (page by page)
+    * Ignores activities that do not have media (photo / video)
+    * Download media files that are not already present in existing_filenames
+ 
+  Arguments:
+    existing_filenames: List of filenames already present in Photos album  
+  
+  Returns:
+    A dictionary of newly downloaded filenames --> corresponding captions.
+  """
   session = requests.Session()
-  auth_token = authenticate_with_procare(session)
-  session.headers.update({"Authorization": "Bearer " + auth_token})
+  authenticate_with_procare(session)
 
   page_num = 1
   filename_desc_map = {}
@@ -260,11 +285,17 @@ def download_from_procare(existing_filenames):
     print(f"Listing {len(activities)} activities from page: {page_num}")
 
     for activity in activities:
-      media_url = get_media_url_from_activity(activity)
+      media_url = None
+      if activity["activity_type"] == "photo_activity":
+        media_url = activity["activiable"]["main_url"]
+      elif activity["activity_type"] == "video_activity":
+        media_url = activity["activiable"]["video_file_url"]
+      
       if media_url is None:
         continue
 
-      media_filename = get_filename_from_activity(activity, media_url)
+      media_filename = activity["activity_time"] + "_" + activity["id"]
+      media_filename += get_file_ext(media_url, activity["activity_type"])
       if media_filename in existing_filenames:
         continue
 
@@ -280,30 +311,23 @@ def download_from_procare(existing_filenames):
 
 
 def list_photos_in_album(creds):
-  headers = {
-      "Authorization": f"Bearer {creds.token}",
-  }
-  params = {
-      "albumId": PHOTOS_ALBUM_ID,
-      "pageSize": 50,
-  }
+  headers = { "Authorization": f"Bearer {creds.token}" }
+  params = { "albumId": PHOTOS_ALBUM_ID, "pageSize": 50 }
 
   existing_filenames = []
-
   while True:
     response = requests.post(
         PHOTOS_LIST_MEDIA_ITEMS_ENDPOINT, headers=headers, json=params
     )
 
     if response.status_code == 200:
-      data = response.json()
-      media_items = data.get("mediaItems", [])
+      media_items = response.json().get("mediaItems", [])
 
       for media_item in media_items:
         existing_filenames.append(media_item.get("filename"))
 
       # nextPageToken will be present only if there are more pages
-      next_page_token = data.get("nextPageToken")
+      next_page_token = response.json().get("nextPageToken")
       if next_page_token:
         params["pageToken"] = next_page_token
       else:
@@ -317,10 +341,11 @@ def list_photos_in_album(creds):
 
 if __name__ == "__main__":
   photos_creds = authenticate_with_google_photos()
+  
   existing_filenames = list_photos_in_album(photos_creds)
   print(f"Found {len(existing_filenames)} in the Google Photos album")
 
-  filename_desc_map = download_from_procare(existing_filenames)
+  filename_desc_map = download_new_media_from_procare(existing_filenames)
   print(f'Downloaded {len(filename_desc_map)} new files from Procare')
 
   add_photos_to_album(photos_creds, filename_desc_map)
