@@ -1,14 +1,14 @@
-from datetime import datetime
 import json
 import mimetypes
+import requests
 import os
 import subprocess
-from urllib.parse import urlparse
+from datetime import datetime
 from dataclasses import dataclass
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-import requests
+from urllib.parse import urlparse
 
 # Your credentials file from the Google Cloud Console
 PHOTOS_CREDENTIALS_FILE = (
