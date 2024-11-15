@@ -41,7 +41,7 @@ Follow these simple steps:
   So if you have duplicate media files in your account, the script will try to re-upload the duplicates on every run.
 * Multiple schools are not supported yet
 
-Feel free to reach out to me (`kashyapcbe [at] gmail [dot] com`) / contribute directly if you see any issues :)
+Feel free to reach out to me / contribute directly if you see any issues :)
 
 ## Contact
 * Email: kashyapcbe [at] gmail [dot] com
