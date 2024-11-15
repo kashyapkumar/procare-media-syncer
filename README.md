@@ -29,7 +29,7 @@ Follow these simple steps:
   5. TODO: add instructions for first time authentication
   6. Create a cronjob to do this periodically! I have it running every 5 mins from 7am-7pm M-F
       ```
-      */5 7-19 * * 1-5 /usr/local/bin/python3 <your base dir>/procare_downloader.py <your base dir> > /tmp/procare-log.txt 2>&1
+      */5 7-19 * * 1-5 /usr/local/bin/python3 <path to file>/procare_downloader.py > /tmp/procare-log.txt 2>&1
       ```
   7. You're all set :)
 

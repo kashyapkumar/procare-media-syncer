@@ -85,7 +85,7 @@ def authenticate_with_google_photos(base_dir):
       )
       creds = flow.run_local_server(port=0)
 
-    with open(PHOTOS_TOKEN_FILE, "w") as token:
+    with open(token_file, "w") as token:
       token.write(creds.to_json())
 
   return creds
@@ -419,9 +419,8 @@ def create_kid_profiles(base_dir, photos_creds, session):
   return kid_profiles
 
 if __name__ == "__main__":
-  base_dir = "."
-  if len(sys.argv) > 1:
-    base_dir = sys.argv[1]
+  base_dir = os.path.dirname(os.path.abspath(__file__))
+  print(f"Executing with base_dir: {base_dir}")
 
   photos_creds = authenticate_with_google_photos(base_dir)
 
