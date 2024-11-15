@@ -21,12 +21,13 @@ Follow these simple steps:
      3. Create credentials for the Photos API
          1. Select OAuth Client ID and Web Application type
          2. Add `https://localhost/` as an authorized redirect URI
-         3. Download the JSON file and save it as `google_photos_credentials.json` in your `secrets` directory  
+         3. Download the JSON file and save it as `google_photos_credentials.json` in your `secrets` directory
+     4. Add yourself as a test user [for your Cloud Console project](https://console.cloud.google.com/auth/audience)
   4. Create a `procare_credentials.json` file in your `secrets` directory with the following JSON content:
       ```
       { "email": <procare email id>, "password": <plaintext password> }
       ```
-  5. TODO: add instructions for first time authentication
+  5. The first run of your script will trigger the browser to allow the script to access your Google account, follow the steps to approve
   6. Create a cronjob to do this periodically! I have it running every 5 mins from 7am-7pm M-F
       ```
       */5 7-19 * * 1-5 /usr/local/bin/python3 <path to file>/procare_downloader.py > /tmp/procare-log.txt 2>&1
