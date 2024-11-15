@@ -43,6 +43,10 @@ Follow these simple steps:
 
 Feel free to reach out to me (`kashyapcbe [at] gmail [dot] com`) / contribute directly if you see any issues :)
 
+## Contact
+* Email: kashyapcbe [at] gmail [dot] com
+* LinkedIn: https://www.linkedin.com/in/kashyapkrishnakumar/
+
 ## References
 * https://github.com/JWally/procare-media-downloader
 * https://blog.nevinpjohn.in/posts/upload-to-google-photos-using-python/
