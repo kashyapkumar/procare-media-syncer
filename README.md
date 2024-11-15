@@ -36,6 +36,8 @@ Follow these simple steps:
 ## Known Issues / Future Work
 * The data/time on Google Photos will be the upload time, so make sure you setup a cron job so that timestamp on Google Photos match Procare timestamps.
   From what I can tell, there is no way to programmtically set the date & time to a user specified time.
+* If two media files are byte equivalent, Photos API reports both as successfully uploaded, but only the first file is added to Google Photos.
+  So if you have duplicate media files in your account, the script will try to re-upload the duplicates on every run.
 * Multiple schools are not supported yet
 
 Feel free to reach out to me (`kashyapcbe [at] gmail [dot] com`) / contribute directly if you see any issues :)
