@@ -269,14 +269,13 @@ def get_file_ext(media_url, activity_type):
     return ".mp4"
 
 
-def download_media(session, media_url, media_filename, activity_time):
+def download_media(session, media_url, media_filename):
   """Downloads media from a given media_url into media_filename
   
   Arguments:
     session: The session object with Procare auth header
     media_url: The url from which media should be downloaded
     media_filename: The filename in DOWNLOADS_DIR to download the media into
-    activity_time: The time to set as creation time on the file's EXIF
   
   Returns:
     No return value.
@@ -292,8 +291,6 @@ def download_media(session, media_url, media_filename, activity_time):
   with open(media_filepath, "wb") as file_handler:
     file_handler.write(response.content)
     file_handler.close()
-
-  update_photo_exif_data(media_filepath, activity_time)
 
 
 def procare_download_new_media(session, kid_id, existing_filenames):
@@ -350,7 +347,11 @@ def procare_download_new_media(session, kid_id, existing_filenames):
         continue
 
       activity_time = activity.get("activity_time")
-      download_media(session, media_url, media_filename, activity_time)
+      download_media(session, media_url, media_filename)
+
+      # TODO: Figure out a similar solution for videos.
+      if activity["activity_type"] == "photo_activity":
+        update_photo_exif_data(DOWNLOADS_DIR + media_filename, activity_time)
 
       description = activity.get("activiable").get("caption")
       filename_desc_map[media_filename] = description
