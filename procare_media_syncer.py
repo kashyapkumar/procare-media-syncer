@@ -3,12 +3,13 @@ import mimetypes
 import requests
 import sys
 import os
-import subprocess
+import piexif
 from datetime import datetime
 from dataclasses import dataclass
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from PIL import Image
 from urllib.parse import urlparse
 
 # Your credentials file from the Google Cloud Console
@@ -47,13 +48,33 @@ class KidProfile:
 def print_failure(prefix_str, response):
   """Prints a failure message given a prefix string & HTTP response
 
-  Args:
+  Arguments:
     prefix_str: The prefix string for the error message
     response: The HTTP response to print for debugging
   """
   print(
       prefix_str + f" code: {response.status_code}, reason:\n{response.text}"
   )
+
+
+def update_photo_exif_data(media_filename, activity_time):
+  """Updates the EXIF metadata of the file with the given time
+
+  Arguments:
+    media_filename: The filename of to update
+    activity_time: The timestamp to set as creation time
+  """
+  creation_time = datetime.fromisoformat(activity_time).strftime(
+      "%Y:%m:%d %H:%M:%S"
+  )
+
+  image = Image.open(media_filename)
+  exif_dict = piexif.load(image.info["exif"])
+  exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal] = creation_time
+  exif_dict['Exif'][piexif.ExifIFD.DateTimeDigitized] = creation_time
+  exif_dict['0th'][piexif.ImageIFD.DateTime] = creation_time
+  exif_bytes = piexif.dump(exif_dict)
+  image.save(media_filename, "jpeg", exif=exif_bytes)
 
 
 def authenticate_with_google_photos(base_dir):
@@ -255,7 +276,7 @@ def download_media(session, media_url, media_filename, activity_time):
     session: The session object with Procare auth header
     media_url: The url from which media should be downloaded
     media_filename: The filename in DOWNLOADS_DIR to download the media into
-    activity_time: The time to set as modified time on the downloaded file
+    activity_time: The time to set as creation time on the file's EXIF
   
   Returns:
     No return value.
@@ -272,7 +293,7 @@ def download_media(session, media_url, media_filename, activity_time):
     file_handler.write(response.content)
     file_handler.close()
 
-  subprocess.run(["touch", f"-d {activity_time}", f"{media_filepath}"])
+  update_photo_exif_data(media_filepath, activity_time)
 
 
 def procare_download_new_media(session, kid_id, existing_filenames):
